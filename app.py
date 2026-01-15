@@ -168,8 +168,14 @@ if len(map_data) > 3:
             bgcolor="rgba(255,255,255,0.8)"
         )
     )
+
+    # Add this right after update_layout
+    fig.update_layout(
+        dragmode='zoom',
+        modebar_add=['zoom2d', 'pan2d']
+    )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
     
     # Statistics at bottom
     st.markdown("---")
