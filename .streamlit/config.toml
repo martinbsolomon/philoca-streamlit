@@ -1,6 +1,3 @@
 [server]
 enableXsrfProtection = false
 enableCORS = false
-
-[browser]
-serverAddress = "philoca-holcim.streamlit.app"
