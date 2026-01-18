@@ -1,13 +1,8 @@
 import streamlit as st
 import pandas as pd
-import folium
-from streamlit_folium import st_folium
+import plotly.graph_objects as go
 from scipy.interpolate import griddata
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
-from io import BytesIO
-import base64
 
 # Page config
 st.set_page_config(
@@ -23,14 +18,6 @@ st.markdown("---")
 
 # Google Sheets URL
 sheet_url = "https://docs.google.com/spreadsheets/d/1pKbEDdcXGnvBspq_ILwkg6D6N-N56GwvRwdX6I_A9f0/export?format=csv"
-
-# Thresholds for each parameter
-THRESHOLDS = {
-    "pco2": None,
-    "o2conc": None,
-    "temp_ctd": None,
-    "temp_o2": None
-}
 
 # Load data
 @st.cache_data
@@ -52,23 +39,6 @@ parameter = st.sidebar.selectbox(
         "temp_o2": "Temperature (O₂)"
     }[x]
 )
-
-# Threshold input
-threshold = THRESHOLDS.get(parameter)
-if threshold:
-    threshold = st.sidebar.number_input(
-        f"Threshold for {parameter}:",
-        value=float(threshold),
-        step=1.0,
-        help="Reference value for comparison"
-    )
-else:
-    threshold = st.sidebar.number_input(
-        f"Set threshold for {parameter}:",
-        value=0.0,
-        step=1.0,
-        help="Reference value for comparison"
-    )
 
 show_points = st.sidebar.checkbox("Show Sampling Points", value=True)
 show_data = st.sidebar.checkbox("Show Raw Data", value=False)
@@ -96,7 +66,7 @@ if len(map_data) > 3:
     lon_padding = (lon_max - lon_min) * 0.05
     
     # Create grid
-    n_points = 200
+    n_points = 100
     grid_lat = np.linspace(lat_min - lat_padding, lat_max + lat_padding, n_points)
     grid_lon = np.linspace(lon_min - lon_padding, lon_max + lon_padding, n_points)
     grid_lon_mesh, grid_lat_mesh = np.meshgrid(grid_lon, grid_lat)
@@ -109,83 +79,88 @@ if len(map_data) > 3:
         method='cubic'
     )
     
-    # Create matplotlib contour plot as PNG
-    matplotlib.use('Agg')
-    fig_mpl = plt.figure(figsize=(10, 10))
-    ax_mpl = fig_mpl.add_axes([0, 0, 1, 1])
+    # Create figure
+    fig = go.Figure()
     
-    # Create filled contours
-    ax_mpl.contourf(
-        grid_lon_mesh, 
-        grid_lat_mesh, 
-        grid_values,
-        levels=15,
-        cmap='coolwarm',
-        alpha=1.0,
-        vmin=np.nanmin(grid_values),
-        vmax=np.nanmax(grid_values)
-    )
+    # Add filled contour
+    fig.add_trace(go.Contour(
+        x=grid_lon,
+        y=grid_lat,
+        z=grid_values,
+        colorscale='RdBu_r',
+        contours=dict(
+            coloring='heatmap',
+            showlabels=True,
+            labelfont=dict(size=10, color='black'),
+        ),
+        colorbar=dict(
+            title=dict(text=parameter, side='right'),
+            thickness=20,
+            len=0.9
+        ),
+        hovertemplate='Value: %{z:.2f}<br>Lat: %{y:.4f}<br>Lon: %{x:.4f}<extra></extra>'
+    ))
     
     # Add contour lines
-    contour_lines = ax_mpl.contour(
-        grid_lon_mesh,
-        grid_lat_mesh,
-        grid_values,
-        levels=10,
-        colors='black',
-        linewidths=1.0
-    )
-    
-    ax_mpl.clabel(contour_lines, inline=True, fontsize=9, fmt='%.0f')
-    ax_mpl.set_xlim(lon_min - lon_padding, lon_max + lon_padding)
-    ax_mpl.set_ylim(lat_min - lat_padding, lat_max + lat_padding)
-    ax_mpl.axis('off')
-    
-    # Save to bytes
-    buf = BytesIO()
-    fig_mpl.savefig(buf, format='png', bbox_inches='tight', pad_inches=0, transparent=True, dpi=200)
-    buf.seek(0)
-    plt.close(fig_mpl)
-    
-    # Calculate center
-    center_lat = (lat_min + lat_max) / 2
-    center_lon = (lon_min + lon_max) / 2
-    
-    # Create Folium map
-    m = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=12,
-        tiles='OpenStreetMap'
-    )
-    
-    # Add image overlay
-    folium.raster_layers.ImageOverlay(
-        name='Contours',
-        image=f'data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}',
-        bounds=[[lat_min - lat_padding, lon_min - lon_padding], 
-                [lat_max + lat_padding, lon_max + lon_padding]],
-        opacity=0.6,
-        interactive=True,
-        cross_origin=False,
-        zindex=1
-    ).add_to(m)
+    fig.add_trace(go.Contour(
+        x=grid_lon,
+        y=grid_lat,
+        z=grid_values,
+        showscale=False,
+        contours=dict(
+            coloring='lines',
+            showlabels=True,
+            labelfont=dict(size=9, color='black'),
+        ),
+        line=dict(color='black', width=1),
+        hoverinfo='skip'
+    ))
     
     # Add sampling points if enabled
     if show_points:
-        for i, (lat, lon, val) in enumerate(zip(lats, lons, values)):
-            folium.CircleMarker(
-                location=[lat, lon],
-                radius=5,
+        fig.add_trace(go.Scatter(
+            x=lons,
+            y=lats,
+            mode='markers',
+            marker=dict(
+                size=8,
                 color='black',
-                fill=True,
-                fillColor='black',
-                fillOpacity=1,
-                popup=f'<b>Sample Point</b><br>Value: {val:.2f}<br>Lat: {lat:.4f}<br>Lon: {lon:.4f}',
-                tooltip=f'{val:.2f}'
-            ).add_to(m)
+                symbol='circle'
+            ),
+            text=[f"{v:.2f}" for v in values],
+            hovertemplate='<b>Sample Point</b><br>Value: %{text}<br>Lat: %{y:.4f}<br>Lon: %{x:.4f}<extra></extra>',
+            name='Sampling Points'
+        ))
     
-    # Display map in Streamlit
-    st_folium(m, width=None, height=700)
+    # Update layout - no map, just plot
+    fig.update_layout(
+        xaxis=dict(
+            title='Longitude',
+            showgrid=True,
+            gridcolor='lightgray'
+        ),
+        yaxis=dict(
+            title='Latitude',
+            scaleanchor='x',
+            showgrid=True,
+            gridcolor='lightgray'
+        ),
+        height=700,
+        showlegend=True,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.8)"
+        ),
+        plot_bgcolor='white'
+    )
+
+    fig.update_xaxes(fixedrange=False)
+    fig.update_yaxes(fixedrange=False)
+    
+    st.plotly_chart(fig, use_container_width=True, config={'scrollZoom': True})
     
     # Statistics at bottom
     st.markdown("---")
